@@ -1,0 +1,89 @@
+const PDFDocument = require('pdfkit');
+const { formatDate, formatCurrency } = require('../utils/dateHelper');
+
+/**
+ * Generate a professional PDF invoice and pipe it to the response stream
+ * @param {object} bill - Bill document from DB
+ * @param {object} user - User/shop owner document
+ * @param {object} res - Express response object (writable stream)
+ */
+const generateInvoicePDF = async (bill, user, res) => {
+  const doc = new PDFDocument({ margin: 50, size: 'A4' });
+  doc.pipe(res);
+
+  const W = 495; // content width
+
+  // ── Header ────────────────────────────────────────────────────────────────
+  doc.fontSize(22).font('Helvetica-Bold').text(user.shopName, 50, 50);
+  doc.fontSize(10).font('Helvetica').fillColor('#555555');
+  if (user.address) doc.text(user.address);
+  if (user.phone) doc.text(`Phone: ${user.phone}`);
+  doc.text(`Email: ${user.email}`);
+
+  doc.moveTo(50, 130).lineTo(545, 130).strokeColor('#CCCCCC').stroke();
+
+  // ── Invoice Info ──────────────────────────────────────────────────────────
+  doc.fillColor('#000000').fontSize(18).font('Helvetica-Bold').text('INVOICE', 50, 145);
+  doc.fontSize(10).font('Helvetica')
+    .text(`Invoice No: ${bill.billNumber}`, 50, 170)
+    .text(`Date: ${formatDate(bill.createdAt)}`, 50, 185)
+    .text(`Status: ${bill.status.toUpperCase()}`, 50, 200)
+    .text(`Payment: ${bill.paymentMethod.toUpperCase()}`, 50, 215);
+
+  doc.text(`Customer: ${bill.customerName}`, 350, 170);
+  if (bill.customerPhone) doc.text(`Phone: ${bill.customerPhone}`, 350, 185);
+
+  // ── Table Header ──────────────────────────────────────────────────────────
+  const tableTop = 250;
+  doc.rect(50, tableTop, W, 20).fill('#2C3E50');
+  doc.fillColor('#FFFFFF').fontSize(10).font('Helvetica-Bold')
+    .text('#', 55, tableTop + 5)
+    .text('Product', 80, tableTop + 5)
+    .text('Qty', 330, tableTop + 5)
+    .text('Unit Price', 380, tableTop + 5)
+    .text('Total', 460, tableTop + 5);
+
+  // ── Table Rows ────────────────────────────────────────────────────────────
+  let y = tableTop + 25;
+  doc.font('Helvetica').fontSize(10);
+
+  bill.items.forEach((item, i) => {
+    const bg = i % 2 === 0 ? '#F8F9FA' : '#FFFFFF';
+    doc.rect(50, y - 3, W, 18).fill(bg);
+    doc.fillColor('#000000')
+      .text(i + 1, 55, y)
+      .text(item.productName, 80, y, { width: 240 })
+      .text(item.quantity, 330, y)
+      .text(formatCurrency(item.unitPrice), 380, y)
+      .text(formatCurrency(item.total), 460, y);
+    y += 20;
+  });
+
+  // ── Totals ────────────────────────────────────────────────────────────────
+  y += 10;
+  doc.moveTo(350, y).lineTo(545, y).strokeColor('#CCCCCC').stroke();
+  y += 10;
+
+  const addTotalRow = (label, value, bold = false) => {
+    doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(10).fillColor('#000000')
+      .text(label, 350, y)
+      .text(formatCurrency(value), 460, y);
+    y += 18;
+  };
+
+  addTotalRow('Subtotal:', bill.subtotal);
+  if (bill.taxRate > 0) addTotalRow(`Tax (${bill.taxRate}%):`, bill.taxAmount);
+  if (bill.discount > 0) addTotalRow('Discount:', -bill.discount);
+
+  doc.moveTo(350, y).lineTo(545, y).strokeColor('#000000').stroke();
+  y += 5;
+  addTotalRow('TOTAL:', bill.totalAmount, true);
+
+  // ── Footer ────────────────────────────────────────────────────────────────
+  doc.fontSize(9).fillColor('#888888')
+    .text('Thank you for your business!', 50, 750, { align: 'center', width: W });
+
+  doc.end();
+};
+
+module.exports = { generateInvoicePDF };

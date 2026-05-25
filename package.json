@@ -1,0 +1,54 @@
+const request = require('supertest');
+const app = require('../server');
+const mongoose = require('mongoose');
+
+let token = '';
+let billId = '';
+
+beforeAll(async () => {
+  await mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/billing_test');
+
+  // Login to get token
+  const res = await request(app).post('/api/auth/login').send({
+    email: 'testuser@test.com',
+    password: 'password123',
+  });
+  token = res.body.data?.token;
+});
+
+afterAll(async () => {
+  await mongoose.connection.close();
+});
+
+describe('Bill Routes', () => {
+  it('should create a draft bill', async () => {
+    const res = await request(app)
+      .post('/api/bills')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        customerName: 'John Doe',
+        items: [{ productName: 'Rice', quantity: 2, unitPrice: 50 }],
+        paymentMethod: 'cash',
+      });
+    expect(res.statusCode).toBe(201);
+    expect(res.body.data).toHaveProperty('billNumber');
+    expect(res.body.data.status).toBe('draft');
+    billId = res.body.data._id;
+  });
+
+  it('should fetch all bills', async () => {
+    const res = await request(app)
+      .get('/api/bills')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.statusCode).toBe(200);
+    expect(Array.isArray(res.body.data.bills)).toBe(true);
+  });
+
+  it('should finalize a bill', async () => {
+    const res = await request(app)
+      .put(`/api/bills/${billId}/finalize`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data.status).toBe('finalized');
+  });
+});
